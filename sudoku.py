@@ -4,6 +4,9 @@ import re
 import argparse
 from ortools.sat.python import cp_model
 import numpy as np
+from typing import List, cast
+from functools import reduce
+from operator import __and__
 
 class SudokuBoard:
     def __init__(self, grid):
@@ -14,43 +17,55 @@ class SudokuBoard:
             assert row_regex.fullmatch(grid[r])
 
         # conversion to 2d array of ints
-        self._grid = [[int(s) for s in list(grid[r])] for r in range(9)]
+        self._grid: List[List[int]] = [[int(s) for s in list(grid[r])] for r in range(9)]
 
     def solve(self):
-        model = cp_model.CpModel()
-        solver = cp_model.CpSolver()
-        SudokuBoard._add_sudoku_constraints(model)
-        solve_status = solver.Solve(model)
+        self._model = cp_model.CpModel()
+        self._solver = cp_model.CpSolver()
+        self._add_sudoku_constraints()
+        self._add_instance_constrains()
+        solve_status = self._solver.Solve(self._model)
         if solve_status == cp_model.OPTIMAL:
-            self.set_solution(solver)
+            self.set_solution()
 
-    def set_solution(self, solver):
+    def set_solution(self):
+        assert self._solver, "Must be called with a solution found" 
         for r in range(9):
             for n in range(1,10):
-                value =  solver.Value()
+                var = self._variables[r][n]
+                c = cast(int, self._solver.Value(var))
+                row = self._grid[r]
+                self._grid[r][c] = n
 
-    def _add_instance_constrains(self, model):
-        #  TODO:  <18-11-20, yourname> # 
-        pass
-
-    @staticmethod
-    def _add_sudoku_constraints(model):
-        column_var = [
-            [model.NewIntVar(0, 8, f"col_{n}_r{r}") for r in range(9)]
-            for n in range(1, 10)
-        ]
-        for n in range(1, 10):
-            model.AddAllDifferent(column_var[n])
+    def _add_instance_constrains(self):
+        assert self._model, "Must be called with a model created" 
         for r in range(9):
-            model.AddAllDifferent([column_var[n][r] for n in range (1,10)])
+            for c in range(9):
+                if self._grid[r][c] != 0:
+                    n = self._grid[r][c]
+                    self._model.Add(self._variables[r][n] == c)
+
+    def _add_sudoku_constraints(self):
+        assert self._model, "Must be called with a model created" 
+        model = self._model
+        variables = { n: [model.NewIntVar(0, 8, f"col_{n}_r{r}") for r in range(9)]
+                for n in range(1, 10)
+                }
+        for n in range(1, 10):
+            model.AddAllDifferent(variables[n])
+        for r in range(9):
+            model.AddAllDifferent([variables[n][r] for n in range (1,10)])
         for i in range(3):
             for j in range(3):
                 for n in range(1,10):
                     in_square_constraints = [
-                        column_var[3*i+k][n] >= 3*j and column_var[3*i+k][n] < 3*(j+1) for
+                        variables[n][3*i+k] >= 3*j and variables[n][3*i+k] < 3*(j+1) for
                         k in range(3)
                     ]
-                    model.Add(sum(in_square_constraints) == 1)
+                    #  TODO:  <18-11-20, yourname> # 
+                    model.Add(not (reduce (__and__, in_square_constraints)))
+
+        self._variables = variables
 
     @staticmethod
     def _print_row(row):
@@ -85,7 +100,8 @@ satisfaction programming"""
                     grid.append(file.readline().rstrip())
                 board = SudokuBoard(grid)
                 print (board)
-                #  board.solve()
+                board.solve()
+                print (board)
 
 
 if __name__ == "__main__":
